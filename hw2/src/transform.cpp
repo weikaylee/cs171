@@ -1,4 +1,6 @@
 #include "transform.hpp"
+#include "object.hpp"
+#include <iostream> 
 
 Eigen::Matrix4d get_translation(float x, float y, float z) {
     Eigen::Matrix4d m;
@@ -9,7 +11,13 @@ Eigen::Matrix4d get_translation(float x, float y, float z) {
     return m;
 }
 
-Eigen::Matrix4d get_rotation(float x, float y, float z, float theta) {
+Eigen::Matrix4d get_rotation(float x1, float y1, float z1, float theta) {
+    // must get unit vector first!!!
+    float norm = Eigen::Vector3d{x1, y1, z1}.norm();
+    float x = x1 / norm;
+    float y = y1 / norm;
+    float z = z1 / norm;
+
     Eigen::Matrix4d m;
     float v11 = x * x + (1 - x * x) * cos(theta);
     float v12 = x * y * (1 - cos(theta)) - z * sin(theta);
@@ -40,22 +48,25 @@ Eigen::Matrix4d get_scaling(float x, float y, float z) {
     return m;
 }
 
-Eigen::Matrix4d get_transformation_matrix(vector<Eigen::Matrix4d> matrices) {
-    Eigen::Matrix4d res = Eigen::Matrix4d::Identity();
+tuple<Eigen::Matrix4d, Eigen::Matrix3d> get_transformation_matrix(vector<Eigen::Matrix4d> matrices) {
+    Eigen::Matrix4d with_translations = Eigen::Matrix4d::Identity();
 
     while (!matrices.empty()) {
-        Eigen::Matrix4d curr = matrices.back(); 
-        res = res * curr; 
-        matrices.pop_back(); 
+        Eigen::Matrix4d curr = matrices.front(); 
+        with_translations = curr * with_translations; 
+        matrices.erase(matrices.begin());
     }
-    return res;
+
+    Eigen::Matrix3d without_translations = with_translations.topLeftCorner<3,3>();
+    without_translations = without_translations.inverse().transpose();
+    return make_tuple(with_translations, without_translations); 
 }
 
 Eigen::Matrix4d get_world_to_camera(float p_x, float p_y, float p_z, float o_x, float o_y, float o_z, float theta) {
     Eigen::Matrix4d translate = get_translation(p_x, p_y, p_z); 
     Eigen::Matrix4d rotate = get_rotation(o_x, o_y, o_z, theta); 
     
-    Eigen::Matrix4d camera_to_world = translate * rotate; 
+    Eigen::Matrix4d camera_to_world = rotate * translate; 
     Eigen::Matrix4d world_to_camera = camera_to_world.inverse(); 
 
     return world_to_camera;
@@ -77,4 +88,30 @@ Eigen::Matrix4d get_homo_ndc(float n, float f, float l, float r, float t, float 
         0, 0, -1, 0;
 
     return homo_ndc;
+}
+
+Vertex world_to_ndc(Vertex vert, Eigen::Matrix4d world_to_camera, Eigen::Matrix4d camera_to_ndc) { 
+    Eigen::Vector4d v;   
+    v << vert.v1, vert.v2, vert.v3, 1;
+
+    // Eigen::Vector4d v_camera = world_to_camera * v; 
+    // Eigen::Vector4d v_ndc = camera_to_ndc * v_camera; 
+    Eigen::Vector4d v_ndc =  camera_to_ndc * world_to_camera * v; 
+    float w_ndc = v_ndc[3];
+    Vertex v_ndc_cartesian = {float(v_ndc[0] / w_ndc), float(v_ndc[1]  / w_ndc), float(v_ndc[2] / w_ndc)};
+    return v_ndc_cartesian; 
+}
+
+bool in_cube(float x, float y, float z) { 
+    return (x >= -1.0 && x <= 1.0) && (y >= -1.0 && y <= 1.0) && (z >= -1.0 && z <= 1.0);
+}
+
+Screen ndc_to_screen(Vertex vert, int xres, int yres) {
+    int new_v1 = int((vert.v1 + 1) / 2 * xres); 
+    int new_v2 = yres - int((vert.v2 + 1) / 2 * yres) - 1; 
+    // if (!in_cube(vert.v1, vert.v2, vert.v3)) { 
+    //     new_v1 = -1; 
+    //     new_v2 = -1; 
+    // }    
+    return Screen{new_v1, new_v2};
 }

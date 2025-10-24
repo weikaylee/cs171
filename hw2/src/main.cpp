@@ -1,36 +1,51 @@
 #include <stdlib.h>
 #include <string>
 #include <iostream> 
+#include <algorithm>
+#include <cmath>
 #include <vector> 
 #include <sstream>
 #include <fstream>
-#include <unordered_map> 
+#include <unordered_map>
+#include <limits> 
 #include <Eigen/Dense>
 
 #include "object.hpp"
 #include "rasterization.hpp"
 #include "transform.hpp"
+#include "scene.hpp"
+#include "image.hpp"
 
 /**
  * @brief transform all vertices corresponding to an object
  * 
  * @param objname The name of the object given in the input file
- * @param trans The transformation matrix from get_trans_matrix to apply 
+ * @param with_trans The transformation matrix from get_trans_matrix, with translations
+ * @param without_trans The transformation matrix from get_trans_matrix, without translations
  * @param objmap Hashmap of all objects given in the input file 
  * @return Object tranformed Object (a copy is returned; original is not changed)
  */
-Object transform_obj(string objname, Eigen::Matrix4d trans, unordered_map<string, Object>& objmap) {
+Object transform_obj(string objname, Eigen::Matrix4d with_trans, Eigen::Matrix3d without_trans, unordered_map<string, Object>& objmap) {
     Object copy = objmap[objname]; 
     vector<Vertex> verts = copy.verts; 
     vector<Face> faces = copy.faces; 
+    vector<Vertex> normals = copy.normals; 
 
     for (int i = 1; i < int(verts.size()); i++) {
         Eigen::Vector4d v; 
         v << verts[i].v1, verts[i].v2, verts[i].v3, 1; 
 
-        Eigen::Vector4d v_trans = trans * v; 
+        Eigen::Vector4d v_trans = with_trans * v; 
         Vertex v_trans_3d = {float(v_trans[0]), float(v_trans[1]), float(v_trans[2])};
         copy.verts[i] = v_trans_3d; 
+
+        Eigen::Vector3d vn; 
+        vn << normals[i].v1, normals[i].v2, normals[i].v3;
+        
+        Eigen::Vector3d vn_trans = without_trans * vn; 
+        vn_trans.normalize();
+        Vertex v_trans_3d_normal = {float(vn_trans[0]), float(vn_trans[1]), float(vn_trans[2])};
+        copy.normals[i] = v_trans_3d_normal; 
     }
 
     return copy; 
@@ -50,11 +65,13 @@ Eigen::Matrix4d get_matrix(string first, float x, float y, float z, float theta)
     return m; 
 }
 
+// create copies of objects (copies are geometrically transformed)
 vector<Object> get_objects(ifstream& file) { 
     unordered_map<string, Object> objmap; 
     vector<Object> objs;
     vector<Object> copies; 
     vector<Eigen::Matrix4d> matrices; 
+    Material material; 
     string objname; 
 
     string line; 
@@ -74,9 +91,30 @@ vector<Object> get_objects(ifstream& file) {
             matrices.push_back(m); 
         }
         else if (line == "" && objname != "") {
-            Eigen::Matrix4d trans = get_transformation_matrix(matrices); 
-            Object transformed = transform_obj(objname, trans, objmap);
+            tuple<Eigen::Matrix4d, Eigen::Matrix3d> trans = get_transformation_matrix(matrices); 
+            Object transformed = transform_obj(objname, get<0>(trans), get<1>(trans), objmap);
+            transformed.material = material; 
             copies.push_back(transformed);
+        }
+        else if (first == "ambient") { 
+            float r, g, b; 
+            ss >> r >> g >> b; 
+            material.ambient = Color{r, g, b};             
+        }
+        else if (first == "diffuse") { 
+            float r, g, b; 
+            ss >> r >> g >> b; 
+            material.diffuse = Color{r, g, b};             
+        }
+        else if (first == "specular") { 
+            float r, g, b; 
+            ss >> r >> g >> b; 
+            material.specular = Color{r, g, b};             
+        }
+        else if (first == "shininess") { 
+            float k;
+            ss >> k;
+            material.shininess = k;            
         }
         else {
             // reset after finding a new object 
@@ -86,8 +124,9 @@ vector<Object> get_objects(ifstream& file) {
     }
 
     // doens't count last empty line, so need to do this again
-    Eigen::Matrix4d trans = get_transformation_matrix(matrices); 
-    Object transformed = transform_obj(objname, trans, objmap);
+    tuple<Eigen::Matrix4d, Eigen::Matrix3d> trans = get_transformation_matrix(matrices); 
+    Object transformed = transform_obj(objname, get<0>(trans), get<1>(trans), objmap);
+    transformed.material = material; 
     copies.push_back(transformed);
 
     return copies; 
@@ -120,42 +159,7 @@ void transform_to_ndc(vector<Object>& copies, Eigen::Matrix4d world_to_camera, E
     } 
 }
 
-bool in_cube(float x, float y) { 
-    return (x >= -1.0 && x <= 1.0) && (y >= -1.0 && y <= 1.0);
-}
-
-/**
- * @brief Convert from cartesian ndc to screen coords. return (-1, -1) if invalid point
- * NOTE THAT Y GROWS DOWNWARDS!!!
- * 
- * @param copies vector of objects in cartesian ndc space 
- * @param xres num cols
- * @param yres num rows 
- */
-void get_screen_coords(vector<Object>& copies, int xres, int yres) { 
-    for (int i = 0; i < int(copies.size()); i++) {
-        vector<Vertex> verts = copies[i].verts; 
-        vector<Screen> screen_coords; 
-
-        // account for one-indexing of vertices 
-        Screen null_screen = {-1, -1}; 
-        screen_coords.push_back(null_screen);
-        
-        for (int j = 1; j < int(verts.size()); j++) {
-            int new_v1 = int((verts[j].v1 + 1) / 2 * xres); 
-            int new_v2 = yres - int((verts[j].v2 + 1) / 2 * yres);
-            if (!in_cube(verts[j].v1, verts[j].v2)) { 
-                new_v1 = -1; 
-                new_v2 = -1; 
-            }    
-            Screen coord = {new_v1, new_v2}; 
-            screen_coords.push_back(coord); 
-        }
-        copies[i].screen_coords = screen_coords;
-    } 
-}
-
-tuple<Eigen::Matrix4d, Eigen::Matrix4d> get_camera(ifstream& file) { 
+tuple<Vertex, Eigen::Matrix4d, Eigen::Matrix4d> get_camera(ifstream& file) { 
     float n, f, l, r, t, b; 
     float p_x, p_y, p_z; 
     float o_x, o_y, o_z, theta; 
@@ -199,67 +203,78 @@ tuple<Eigen::Matrix4d, Eigen::Matrix4d> get_camera(ifstream& file) {
 
     Eigen::Matrix4d world_to_camera = get_world_to_camera(p_x, p_y, p_z, o_x, o_y, o_z, theta); 
     Eigen::Matrix4d homo_ndc = get_homo_ndc(n, f, l, r, t, b); 
-
-    return make_tuple(world_to_camera, homo_ndc); 
+    Vertex camera = Vertex{p_x, p_y, p_z};
+    return make_tuple(camera, world_to_camera, homo_ndc); 
 }
 
-void get_ppm(int xres, int yres, vector<vector<int>> grid) { 
-    cout << "P3" << endl;
-    cout << xres << " " << yres << endl;
-    cout << "255" << endl;
-
-    string color_bg = "0 0 0";       
-    string color = "255 255 255"; 
-    for (int i = 0; i < yres; i++) {        
-        for (int j = 0; j < xres; j++) {
-            if (grid[i][j] == 1) {
-                cout << color << endl;
-            } 
-            else {
-                cout << color_bg << endl;
-            }
+vector<Light> get_lights(ifstream& file) { 
+    vector<Light> lights; 
+    string line; 
+    while (getline(file, line)) {
+        if (line.empty()) { 
+            break; 
         }
+        
+        istringstream ss(line); 
+        float x, y, z, k;
+        float r, g, b; 
+        char comma; 
+        string token; 
+        ss >> token >> x >> y >> z >> comma >> r >> g >> b >> comma >> k;
+        Light light  = {Vertex{x, y, z}, Color{r, g, b}, k}; 
+        lights.push_back(light); 
     }
+    return lights;    
 }
 
 int main(int argc, char *argv[]) {
-    ifstream file(string("../data/") + argv[1]);
+    ifstream file(argv[1]);
     int xres = atoi(argv[2]);
     int yres = atoi(argv[3]);
+    int mode = atoi(argv[4]);
 
-    Eigen::Matrix4d world_to_camera, homo_ndc; 
-    vector<Object> copies;  
+    Scene scene; 
     string line; 
     while (getline(file, line)) {
         if (line == "camera:") { 
-            tuple<Eigen::Matrix4d, Eigen::Matrix4d> matrix_tuple = get_camera(file); 
-            world_to_camera = get<0>(matrix_tuple);
-            homo_ndc = get<1>(matrix_tuple); 
+            tuple<Vertex, Eigen::Matrix4d, Eigen::Matrix4d> matrix_tuple = get_camera(file); 
+            scene.camera = get<0>(matrix_tuple);
+            scene.world_to_camera = get<1>(matrix_tuple);
+            scene.camera_to_ndc = get<2>(matrix_tuple); 
         }
         else if (line == "objects:") { 
-            copies = get_objects(file); 
+            scene.copies = get_objects(file); // already transforms everything (normals + vertices)
+        }
+        else if (line.find("light") != string::npos) {
+            vector<Light> lights; 
+
+            istringstream ss(line); 
+            float x, y, z, k;
+            float r, g, b; 
+            char comma; 
+            string token; 
+            ss >> token >> x >> y >> z >> comma >> r >> g >> b >> comma >> k;
+            Light light  = {Vertex{x, y, z}, Color{r, g, b}, k}; 
+            lights.push_back(light); 
+
+            vector<Light> all_lights = get_lights(file);
+            lights.insert(lights.end(), all_lights.begin(), all_lights.end());  
+            scene.lights = lights;
         }
     }
 
-    transform_to_ndc(copies, world_to_camera, homo_ndc); 
-    get_screen_coords(copies, xres, yres);
+    // create image 
+    vector<vector<Color>> grid(yres, vector<Color>(xres, Color{0, 0, 0}));
+    vector<vector<float>> buffer(yres, vector<float>(xres, numeric_limits<float>::max()));
+    Image img = Image{xres, yres, buffer, grid, scene};
 
-    vector<vector<int>> grid(yres, vector<int>(xres, 0));
-    for (int i = 0; i < int(copies.size()); i++) { 
-        vector<Screen> screens = copies[i].screen_coords;
-
-        vector<Face> faces = copies[i].faces; 
-
-        for (int j = 0; j < int(faces.size()); j++) {
-            int idx1 = faces[j].f1; 
-            int idx2 = faces[j].f2; 
-            int idx3 = faces[j].f3; 
-
-            bresenham(screens[idx1].x, screens[idx1].y,screens[idx2].x, screens[idx2].y, xres, yres, grid);
-            bresenham(screens[idx1].x, screens[idx1].y,screens[idx3].x, screens[idx3].y,  xres, yres, grid);
-            bresenham(screens[idx2].x, screens[idx2].y,screens[idx3].x, screens[idx3].y,  xres, yres, grid);
-        }
+    // rasterize all objects in scene in img
+    if (mode == 0) {
+        gouraud_shading(img); 
     }
-
-    get_ppm(xres, yres, grid); 
+    else if (mode == 1) { 
+        phong_shading(img); 
+    }
+    
+    get_ppm(xres, yres, img.grid); 
 }
