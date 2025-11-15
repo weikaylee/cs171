@@ -8,6 +8,8 @@ struct Quaternion {
     Eigen::Vector3d v; 
 };
 
+Quaternion normalize(Quaternion q1); 
+
 Quaternion multiply(Quaternion q1, Quaternion q2); 
 
 Eigen::Matrix4d get_rotation_matrix(Quaternion q); 

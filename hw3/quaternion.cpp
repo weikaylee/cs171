@@ -5,6 +5,16 @@
 //     Eigen::Vector3d v; 
 // };
 
+Quaternion normalize(Quaternion q) {
+    float magnitude = sqrt(q.s * q.s + q.v.dot(q.v));
+    
+    // Divide each component by the magnitude
+    float new_s = q.s / magnitude;
+    Eigen::Vector3d new_v = q.v / magnitude;
+    
+    return Quaternion{new_s, new_v};
+}
+
 Quaternion multiply(Quaternion q1, Quaternion q2) {
     float new_s = q1.s * q2.s - (q1.v).dot(q2.v); 
     Eigen::Vector3d new_v = q1.s * q2.v + q2.s * q1.v + (q1.v).cross(q2.v); 
