@@ -94,20 +94,24 @@ struct Object
     float shininess;
 };
 
-float cam_position[3];
-float cam_orientation_axis[3];
+float cam_position[] = {0, 0, 5.4};
+float cam_orientation_axis[] = {0, 1, 0};
 
-float cam_orientation_angle;
+/* Angle in degrees.
+ */ 
+float cam_orientation_angle = 0;
 
-float near_param, far_param,
-      left_param, right_param,
-      top_param, bottom_param;
+float near_param = 1, far_param = 20,
+      left_param = -1, right_param = 1,
+      top_param = 1, bottom_param = -1;
 
  
 vector<Point_Light> lights;
 vector<Object> objects;
 
-int xres, yres; 
+int xres = 500;
+int yres = 500;
+
 int mouse_start_x, mouse_start_y;
 int mouse_current_x, mouse_current_y;
 float mouse_scale_x, mouse_scale_y;
@@ -121,9 +125,8 @@ bool wireframe_mode = false;
 
 unordered_map<string, Object> objmap; // map the obj name to its file
 
-void parse_obj_file(); 
 void create_lights();
-void create_objects();
+void create_square();
 
 Quaternion last_rotation; 
 Quaternion current_rotation; 
@@ -132,17 +135,17 @@ Eigen::Matrix4d get_current_rotation();
 // shader vars 
 GLenum shaderProgram;
 string vert_prog_filename, frag_prog_filename;
-static GLenum color_tex, normal_tex;
+GLenum color_tex, normal_tex;
 
 void init(char * color_texture, char * normal_map)
 {
-    // glewInit();
-    cerr << "Loading textures" << endl;
     if(!(color_tex = readpng(color_texture)))
         exit(1);
     if(!(normal_tex = readpng(normal_map)))
         exit(1);
     
+    glEnable(GL_TEXTURE_2D);
+
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
     
@@ -159,7 +162,10 @@ void init(char * color_texture, char * normal_map)
               bottom_param, top_param,
               near_param, far_param);
     glMatrixMode(GL_MODELVIEW);
-    
+
+    create_lights();
+    create_square();
+
     init_lights();
 
     last_rotation = get_identity_quaternion(); 
@@ -277,6 +283,13 @@ void read_shaders() {
     // enable texture and normal mapping
     GLint color_uniform_pos = glGetUniformLocation(shaderProgram, "color_texture");
     GLint normal_uniform_pos = glGetUniformLocation(shaderProgram, "normal_map_texture");
+
+    if (color_uniform_pos == -1) {
+        cerr << "Warning: color_texture uniform not found in shader!" << endl;
+    }
+    if (normal_uniform_pos == -1) {
+        cerr << "Warning: normal_map uniform not found in shader!" << endl;
+    }
 
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, color_tex);
@@ -431,6 +444,13 @@ void draw_objects()
             GLint texture_attribute_loc = glGetAttribLocation(
                                                 shaderProgram, "texture");
 
+            if (tangent_attribute_loc == -1) {
+                cerr << "Warning: tangent attribute not found!" << endl;
+            }
+            if (texture_attribute_loc == -1) {
+                cerr << "Warning: texture attribute not found!" << endl;
+            }
+
             glVertexAttribPointer(tangent_attribute_loc, 3, GL_FLOAT, GL_FALSE,
                                     0, &objects[i].tangent_buffer[0]);
             glVertexAttribPointer(texture_attribute_loc, 3, GL_FLOAT, GL_FALSE,
@@ -446,6 +466,10 @@ void draw_objects()
             else
                 for(int j = 0; j < buffer_size; j += 3)
                     glDrawArrays(GL_LINE_LOOP, j, 3);
+            
+            // disable vertex attribute arrays after drawing
+            glDisableVertexAttribArray(tangent_attribute_loc);
+            glDisableVertexAttribArray(texture_attribute_loc);
         }
 
         glPopMatrix();
@@ -550,7 +574,7 @@ void create_lights()
     
     light1.color[0] = 1;
     light1.color[1] = 1;
-    light1.color[2] = 0;
+    light1.color[2] = 1;
     light1.attenuation_k = 0.2;
     
     lights.push_back(light1);
@@ -585,46 +609,46 @@ void create_square()
     Triple point1;
     point1.x = -1;
     point1.y = -1;
-    point1.z = 1;
+    point1.z = 0;
     
     Triple point2;
     point2.x = 1;
     point2.y = -1;
-    point2.z = 1;
+    point2.z = 0;
     
     Triple point3;
     point3.x = 1;
     point3.y = 1;
-    point3.z = 1;
+    point3.z = 0;
     
     Triple point4;
     point4.x = -1;
     point4.y = 1;
-    point4.z = 1;
+    point4.z = 0;
 
     ///////////////////////////////////////////////////////////////////////////////////////////////
-    // Texture points
+    // Texture points (in range [0, 1])
     ///////////////////////////////////////////////////////////////////////////////////////////////
     
     Triple tex1;
-    tex1.x = -1;
-    tex1.y = -1;
-    tex1.z = 1;
+    tex1.x = 0;
+    tex1.y = 0;
+    tex1.z = 0;
     
     Triple tex2;
     tex2.x = 1;
-    tex2.y = -1;
-    tex2.z = 1;
+    tex2.y = 0;
+    tex2.z = 0;
     
     Triple tex3;
     tex3.x = 1;
     tex3.y = 1;
-    tex3.z = 1;
+    tex3.z = 0;
     
     Triple tex4;
-    tex4.x = -1;
+    tex4.x = 0;
     tex4.y = 1;
-    tex4.z = 1;
+    tex4.z = 0;
 
     
     ///////////////////////////////////////////////////////////////////////////////////////////////
@@ -640,8 +664,6 @@ void create_square()
     tangent.x = 1;
     tangent.y = 0;
     tangent.z = 0;
-
-    // TODO binomral?
         
     ///////////////////////////////////////////////////////////////////////////////////////////////
     // Vertex and Normal Arrays
@@ -723,18 +745,18 @@ int main(int argc, char* argv[])
      */
     glutCreateWindow("Test");
 
-    // GLenum err = glewInit();
-    // if (err != GLEW_OK) {
-    //     cerr << "GLEW Error: " << glewGetErrorString(err) << endl;
-    //     return 1;
-    // }
-    vert_prog_filename = "vertex_program.glsl";
-    frag_prog_filename = "fragment_program.glsl";
-    read_shaders();
-
+    GLenum err = glewInit();
+    if (err != GLEW_OK) {
+        cerr << "GLEW Error: " << glewGetErrorString(err) << endl;
+        return 1;
+    }
     /* Call our 'init' function...
      */
     init(color_texture, normal_map); // load textures in here
+
+    vert_prog_filename = "./vertex_program.glsl";
+    frag_prog_filename = "./fragment_program.glsl";
+    read_shaders();
 
     /* Specify to OpenGL our display function.
      */

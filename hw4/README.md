@@ -1,4 +1,6 @@
 ## Running the program 
-`cd` into `hw3` and run `make` to compile everything. Then, run `./opengl_renderer ./data/your_scene.txt xres yres`. Make sure that all parameters are passed (else will seg fault). 
+### Part 1
+`cd` into `part1` and run `make` to compile everything. Then, run `./opengl_renderer [scene_description_file.txt] [xres] [yres] [mode]`. 
 
-If the mouse is dragged outside of the screen, there may be undefined behavior. 
+### Part 2
+`cd` into `part2` and run `make` to compile everything. Then, run `./opengl_renderer [color_texture.png] [normal_map.png]`. 
